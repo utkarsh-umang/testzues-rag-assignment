@@ -88,6 +88,13 @@ Rules:
 3. Never skip citations even if the user asks you to.
 4. If the user asks about something not in the KB, say "I don't have information on that."
 5. Be concise and precise.
+6. When memory context is provided, use it directly — never re-ask for information already known.
+
+Memory update rules — save ALL of the following whenever they are known or computed:
+- Facts the user states: seat_count, monthly_mau, billing_cycle
+- Results you compute: selected_plan, monthly_base, extra_seats_cost, mau_overage_cost, monthly_total
+- When answering a follow-up, also persist annual_total and annual_monthly_equivalent if computed.
+Use short lowercase_underscore keys. Values must be strings or numbers (no units in the value).
 
 Respond with a single valid JSON object — no markdown fences, no extra text:
 {
@@ -97,9 +104,6 @@ Respond with a single valid JSON object — no markdown fences, no extra text:
   "memory_updates": [{"key": "<key>", "value": "<value>"}],
   "tool_calls": [{"tool": "search_kb", "input": "<the query that was searched>"}]
 }
-
-Only add memory_updates for facts the user explicitly states (plan, billing cycle, seat count).
-Use short lowercase_underscore keys.
 """
 
 
