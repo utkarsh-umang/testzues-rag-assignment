@@ -1,11 +1,15 @@
 """
 LangGraph agent graph for AcmeCloud KB Q&A.
 
-Flow per conversation turn:
+Flow per conversation turn (happy path):
     retrieve  →  answer  →  save
 
-State is carried through all nodes; memory persists across turns as a flat
-key-value dict written to memory.json via agent.memory helpers.
+When evidence is weak (no citations / "cannot answer") and retries remain:
+    answer  →  refine_and_retrieve  →  answer  →  save
+
+The conditional edge after `answer` implements the agentic second-pass:
+it detects weak evidence and loops back with a refined query before
+giving up and saving.
 """
 
 from __future__ import annotations
@@ -29,18 +33,35 @@ from agent.schema import Answer
 # ---------------------------------------------------------------------------
 _TOP_K = 5
 
+# How many times the agent may retry with a refined query when evidence is weak
+_MAX_RETRIES = 1
+
+# Phrases in the LLM's answer that signal weak / absent evidence
+_WEAK_EVIDENCE_PHRASES = (
+    "cannot answer",
+    "can't answer",
+    "don't have information",
+    "do not have information",
+    "no information",
+    "not in the kb",
+    "not covered",
+    "insufficient",
+)
+
 # ---------------------------------------------------------------------------
 # Graph state
 # ---------------------------------------------------------------------------
 
 class AgentState(TypedDict):
     turn: int
-    query: str
+    query: str                        # current search query (may be refined)
+    original_query: str               # user's original question, never mutated
     kb_dir: str
     out_dir: str
     retrieval_results: list[SearchResult]
     answer: Answer | None
     memory: dict[str, Any]
+    retry_count: int                  # how many second-pass retries have run
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +161,83 @@ def answer(state: AgentState) -> AgentState:
 
 
 # ---------------------------------------------------------------------------
+# Conditional routing: decide whether a second-pass retry is warranted
+# ---------------------------------------------------------------------------
+
+def _is_weak_evidence(ans: Answer) -> bool:
+    """Return True when the LLM signalled it lacked sufficient KB evidence."""
+    if not ans.citations:
+        return True
+    lowered = ans.final_answer.lower()
+    return any(phrase in lowered for phrase in _WEAK_EVIDENCE_PHRASES)
+
+
+def _route_after_answer(state: AgentState) -> str:
+    """
+    Conditional edge function called after the `answer` node.
+
+    Routes to:
+      - "refine_and_retrieve"  when evidence is weak AND retries remain
+      - "save"                 otherwise
+    """
+    ans = state["answer"]
+    if ans is not None and _is_weak_evidence(ans) and state["retry_count"] < _MAX_RETRIES:
+        print(
+            f"  [retry {state['retry_count'] + 1}/{_MAX_RETRIES}] "
+            f"Weak evidence detected — refining query…"
+        )
+        return "refine_and_retrieve"
+    return "save"
+
+
+# ---------------------------------------------------------------------------
+# Node: refine_and_retrieve  (second-pass agentic behavior)
+# ---------------------------------------------------------------------------
+
+_REFINE_PROMPT = """You are a search query optimizer for a support KB.
+
+The original user question yielded weak or no results.
+Your job: rewrite the search query using different keywords, synonyms, or
+a more specific sub-question likely to match KB content.
+
+Original question: {original_query}
+Current (failed) query: {current_query}
+LLM answer so far: {current_answer}
+
+Reply with ONLY the refined search query — no explanation, no quotes."""
+
+
+def refine_and_retrieve(state: AgentState) -> AgentState:
+    """
+    Second-pass node: ask the LLM for a better search query, then re-retrieve.
+
+    This implements the agentic self-check loop — when the first answer lacked
+    citations or admitted ignorance, we reformulate rather than give up.
+    """
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+    refine_prompt = _REFINE_PROMPT.format(
+        original_query=state["original_query"],
+        current_query=state["query"],
+        current_answer=state["answer"].final_answer if state["answer"] else "(none)",
+    )
+
+    refined_query = llm.invoke([{"role": "user", "content": refine_prompt}]).content.strip()
+    print(f"  [refine] new query: {refined_query!r}")
+
+    # Re-run retrieval with the refined query
+    retriever = KeywordSearchRetriever(state["kb_dir"])
+    results = retriever.search(refined_query)
+
+    return {
+        **state,
+        "query": refined_query,
+        "retrieval_results": results[:_TOP_K],
+        "retry_count": state["retry_count"] + 1,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Node: save
 # ---------------------------------------------------------------------------
 
@@ -158,11 +256,19 @@ def build_graph() -> StateGraph:
     g = StateGraph(AgentState)
     g.add_node("retrieve", retrieve)
     g.add_node("answer", answer)
+    g.add_node("refine_and_retrieve", refine_and_retrieve)
     g.add_node("save", save)
 
     g.set_entry_point("retrieve")
     g.add_edge("retrieve", "answer")
-    g.add_edge("answer", "save")
+
+    # Conditional second-pass: retry with refined query when evidence is weak
+    g.add_conditional_edges(
+        "answer",
+        _route_after_answer,
+        {"refine_and_retrieve": "refine_and_retrieve", "save": "save"},
+    )
+    g.add_edge("refine_and_retrieve", "answer")  # loop back for re-answering
     g.add_edge("save", END)
 
     return g.compile()
@@ -188,11 +294,13 @@ def run_conversation(turns: list[dict], kb_dir: str, out_dir: str) -> None:
         state: AgentState = {
             "turn": turn["turn"],
             "query": query,
+            "original_query": query,
             "kb_dir": kb_dir,
             "out_dir": out_dir,
             "retrieval_results": [],
             "answer": None,
             "memory": memory,
+            "retry_count": 0,
         }
 
         final_state = graph.invoke(state)
