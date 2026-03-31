@@ -34,6 +34,7 @@ _TOP_K = 5
 # ---------------------------------------------------------------------------
 
 class AgentState(TypedDict):
+    turn: int
     query: str
     kb_dir: str
     out_dir: str
@@ -143,8 +144,8 @@ def answer(state: AgentState) -> AgentState:
 # ---------------------------------------------------------------------------
 
 def save(state: AgentState) -> AgentState:
-    """Write outputs and flush the current memory state to disk."""
-    save_outputs(state["out_dir"], state["query"], state["answer"])
+    """Append this turn's outputs and flush the current memory state to disk."""
+    save_outputs(state["out_dir"], state["turn"], state["query"], state["answer"])
     write_memory(state["out_dir"], state["memory"])
     return state
 
@@ -185,6 +186,7 @@ def run_conversation(turns: list[dict], kb_dir: str, out_dir: str) -> None:
         print(f"\n[Turn {turn['turn']}] {query}")
 
         state: AgentState = {
+            "turn": turn["turn"],
             "query": query,
             "kb_dir": kb_dir,
             "out_dir": out_dir,
