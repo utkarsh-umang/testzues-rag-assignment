@@ -4,14 +4,14 @@ Output helpers for writing agent results to the out directory.
 Writes:
   - answer.json  — structured Answer (Pydantic → JSON)
   - answer.md    — human-readable markdown
-  - memory.json  — kept up to date by agent.memory; ensured to exist here
+
+Memory persistence is handled separately by agent.memory.write_memory.
 """
 
 from __future__ import annotations
 
 import os
 
-from agent.memory import write_memory
 from agent.schema import Answer
 
 
@@ -33,8 +33,8 @@ def _answer_to_markdown(query: str, ans: Answer) -> str:
     return "\n".join(parts)
 
 
-def save_outputs(out_dir: str, query: str, ans: Answer, memory: dict) -> None:
-    """Write answer.json, answer.md, and (if absent) memory.json to *out_dir*."""
+def save_outputs(out_dir: str, query: str, ans: Answer) -> None:
+    """Write answer.json and answer.md to *out_dir*."""
     os.makedirs(out_dir, exist_ok=True)
 
     with open(os.path.join(out_dir, "answer.json"), "w", encoding="utf-8") as fh:
@@ -42,7 +42,3 @@ def save_outputs(out_dir: str, query: str, ans: Answer, memory: dict) -> None:
 
     with open(os.path.join(out_dir, "answer.md"), "w", encoding="utf-8") as fh:
         fh.write(_answer_to_markdown(query, ans))
-
-    # Ensure memory.json is always present, even when no updates were made
-    if not os.path.isfile(os.path.join(out_dir, "memory.json")):
-        write_memory(out_dir, memory)

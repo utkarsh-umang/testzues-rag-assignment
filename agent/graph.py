@@ -19,7 +19,7 @@ from langchain_openai import ChatOpenAI
 load_dotenv()
 from langgraph.graph import END, StateGraph
 
-from agent.memory import read_memory, update_memory
+from agent.memory import read_memory, write_memory
 from agent.output import save_outputs
 from agent.retriever import KeywordSearchRetriever, SearchResult
 from agent.schema import Answer
@@ -132,9 +132,8 @@ def answer(state: AgentState) -> AgentState:
     data = json.loads(raw)
     structured = Answer.model_validate(data)
 
-    # Merge LLM-extracted facts into memory
-    memory_patch = {mu.key: mu.value for mu in structured.memory_updates}
-    updated_memory = update_memory(state["out_dir"], memory_patch) if memory_patch else state["memory"]
+    # Merge LLM-extracted facts into the in-memory state dict (no disk I/O here)
+    updated_memory = {**state["memory"], **{mu.key: mu.value for mu in structured.memory_updates}}
 
     return {**state, "answer": structured, "memory": updated_memory}
 
@@ -144,8 +143,9 @@ def answer(state: AgentState) -> AgentState:
 # ---------------------------------------------------------------------------
 
 def save(state: AgentState) -> AgentState:
-    """Delegate output writing to agent.output.save_outputs."""
-    save_outputs(state["out_dir"], state["query"], state["answer"], state["memory"])
+    """Write outputs and flush the current memory state to disk."""
+    save_outputs(state["out_dir"], state["query"], state["answer"])
+    write_memory(state["out_dir"], state["memory"])
     return state
 
 
