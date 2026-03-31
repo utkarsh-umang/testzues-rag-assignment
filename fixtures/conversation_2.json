@@ -1,0 +1,15 @@
+{
+  "conversation_id": "conv_2",
+  "turns": [
+    {
+      "turn": 1,
+      "role": "user",
+      "message": "We are 12 seats and expect 120k MAU monthly. Which plan is cheapest monthly?"
+    },
+    {
+      "turn": 2,
+      "role": "user",
+      "message": "Now price it annually with the discount, and tell me if seats are prorated if we add 2 seats mid-month."
+    }
+  ]
+}
