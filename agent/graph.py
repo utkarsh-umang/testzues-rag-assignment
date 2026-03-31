@@ -311,6 +311,6 @@ def run_conversation(turns: list[dict], kb_dir: str, out_dir: str) -> None:
         memory = final_state["memory"]
         ans = final_state["answer"]
 
-        print(f"  → {ans.final_answer[:120]}")
+        print(f"  → {ans.final_answer}")
         for c in ans.citations:
             print(f"     cite: {c.file}:{c.lines}")
