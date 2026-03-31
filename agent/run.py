@@ -10,7 +10,7 @@ import json
 import os
 import sys
 
-from agent.retriever import KeywordSearchRetriever
+from agent.graph import run_conversation
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,26 +55,9 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"\nConversation: {conversation_id}  ({len(turns)} turn(s))")
 
-    retriever = KeywordSearchRetriever(args.kb)
+    run_conversation(turns=turns, kb_dir=args.kb, out_dir=args.out)
 
-    for turn in turns:
-        query = turn["message"]
-        print(f"\n{'='*70}")
-        print(f"Turn {turn['turn']} [{turn['role']}]: {query}")
-        print(f"{'='*70}")
-
-        results = retriever.search(query)
-        if not results:
-            print("  (no KB results found)")
-        else:
-            for r in results:
-                print(
-                    f"  [{r.match_type:7}] score={r.score:.2f}  "
-                    f"{r.file}:{r.lines}  terms={r.matched_terms}"
-                )
-                print(f"    > {r.text[:120].replace(chr(10), ' ')}")
-
-    os.makedirs(args.out, exist_ok=True)
+    print(f"\nOutputs written to {args.out}/")
 
 
 if __name__ == "__main__":
